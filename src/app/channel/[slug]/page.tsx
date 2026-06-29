@@ -45,7 +45,7 @@ export default async function ChannelPage({ params }: Props) {
     getMountStats(channel.icecast_mount),
   ])
 
-  const isLive = channel.is_live && !!mountStats
+  const isLive = channel.is_live
   const listenerCount = mountStats?.listeners ?? channel.listener_count
   const streamUrl = getStreamUrl(channel.icecast_mount)
 
