@@ -1,0 +1,18 @@
+[Unit]
+Description=Castlr WebSocket-to-Icecast relay
+After=network.target icecast2.service
+
+[Service]
+Type=simple
+User=ademola
+WorkingDirectory=/home/ademola/castlr-relay
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+Environment=ICECAST_SOURCE_PASSWORD=qQqMapRWD2zrKZ95tnqy
+Environment=SUPABASE_URL=https://erpshzoxtwovhssintpv.supabase.co
+Environment=SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
+
+[Install]
+WantedBy=multi-user.target

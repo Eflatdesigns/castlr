@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
 import { Channel } from '@/types'
 import { Mic, MicOff, Radio, Users, Copy, Check, ArrowLeft } from 'lucide-react'
 
@@ -12,9 +11,8 @@ interface Props {
 
 type BroadcastState = 'idle' | 'connecting' | 'live' | 'error'
 
-// WebSocket Icecast source client (RFC 2822 / ICY protocol via WebSocket relay)
-// This requires a WebSocket-to-Icecast bridge on the server. For OBS/BUTT it's not needed.
-// Here we use MediaRecorder → fetch chunked upload to a relay endpoint.
+const RELAY_URL = process.env.NEXT_PUBLIC_RELAY_URL || 'wss://stream.castlr.online/relay'
+
 export default function BroadcastClient({ channel }: Props) {
   const [state, setState] = useState<BroadcastState>('idle')
   const [errorMsg, setErrorMsg] = useState('')
@@ -23,9 +21,10 @@ export default function BroadcastClient({ channel }: Props) {
   const [audioLevel, setAudioLevel] = useState(0)
 
   const mediaStreamRef = useRef<MediaStream | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animFrameRef = useRef<number>(0)
-  const supabase = createClient()
 
   // Poll listener count while live
   useEffect(() => {
@@ -40,7 +39,6 @@ export default function BroadcastClient({ channel }: Props) {
     return () => clearInterval(interval)
   }, [state, channel.icecast_mount])
 
-  // Audio level meter
   const startLevelMeter = useCallback((stream: MediaStream) => {
     const ctx = new AudioContext()
     const source = ctx.createMediaStreamSource(stream)
@@ -48,7 +46,6 @@ export default function BroadcastClient({ channel }: Props) {
     analyser.fftSize = 256
     source.connect(analyser)
     analyserRef.current = analyser
-
     const buf = new Uint8Array(analyser.frequencyBinCount)
     function tick() {
       analyser.getByteFrequencyData(buf)
@@ -67,37 +64,91 @@ export default function BroadcastClient({ channel }: Props) {
   async function startBroadcast() {
     setErrorMsg('')
     setState('connecting')
+
+    let stream: MediaStream
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-      mediaStreamRef.current = stream
-      startLevelMeter(stream)
-
-      // Mark channel as live in DB
-      await supabase.from('channels').update({ is_live: true }).eq('id', channel.id)
-
-      setState('live')
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Could not access microphone'
-      setErrorMsg(msg)
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    } catch {
+      setErrorMsg('Could not access microphone. Please allow microphone access and try again.')
       setState('error')
+      return
+    }
+
+    mediaStreamRef.current = stream
+
+    const ws = new WebSocket(RELAY_URL)
+    wsRef.current = ws
+    ws.binaryType = 'arraybuffer'
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: 'start',
+        mount: channel.icecast_mount,
+        streamPassword: channel.stream_password,
+      }))
+    }
+
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'ready') {
+          // Relay is connected to Icecast — start sending audio
+          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus'
+            : 'audio/webm'
+
+          const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128000 })
+          recorderRef.current = recorder
+
+          recorder.ondataavailable = (ev) => {
+            if (ev.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+              ws.send(ev.data)
+            }
+          }
+
+          recorder.start(250) // send chunks every 250ms
+          startLevelMeter(stream)
+          setState('live')
+        }
+      } catch {}
+    }
+
+    ws.onerror = () => {
+      setErrorMsg('Could not connect to relay server. Try again or use OBS/BUTT.')
+      cleanup()
+      setState('error')
+    }
+
+    ws.onclose = (e) => {
+      if (state === 'live' || state === 'connecting') {
+        if (e.code === 4003) {
+          setErrorMsg('Invalid stream credentials.')
+        } else if (e.code !== 1000) {
+          setErrorMsg('Connection lost.')
+        }
+        cleanup()
+        setState('error')
+      }
     }
   }
 
-  async function stopBroadcast() {
+  function cleanup() {
+    recorderRef.current?.stop()
+    recorderRef.current = null
     mediaStreamRef.current?.getTracks().forEach((t) => t.stop())
     mediaStreamRef.current = null
+    wsRef.current?.close()
+    wsRef.current = null
     stopLevelMeter()
-    await supabase.from('channels').update({ is_live: false }).eq('id', channel.id)
+  }
+
+  async function stopBroadcast() {
+    cleanup()
     setState('idle')
     setListenerCount(0)
   }
 
-  useEffect(() => {
-    return () => {
-      mediaStreamRef.current?.getTracks().forEach((t) => t.stop())
-      stopLevelMeter()
-    }
-  }, [stopLevelMeter])
+  useEffect(() => () => cleanup(), [])
 
   async function copyToClipboard(text: string, key: string) {
     await navigator.clipboard.writeText(text)
@@ -105,14 +156,11 @@ export default function BroadcastClient({ channel }: Props) {
     setTimeout(() => setCopied(null), 2000)
   }
 
-  const icecastUrl = process.env.NEXT_PUBLIC_ICECAST_URL || 'http://your-server:8000'
+  const icecastUrl = process.env.NEXT_PUBLIC_ICECAST_URL || ''
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 space-y-8">
-      <Link
-        href="/dashboard"
-        className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition"
-      >
+      <Link href="/dashboard" className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition">
         <ArrowLeft className="h-4 w-4" />
         Dashboard
       </Link>
@@ -128,7 +176,6 @@ export default function BroadcastClient({ channel }: Props) {
 
       {/* Broadcast control */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-8">
-        {/* Status */}
         <div className="mb-8 flex items-center gap-4">
           <div className={`h-3 w-3 rounded-full ${
             state === 'live' ? 'bg-red-500 animate-pulse' :
@@ -149,7 +196,6 @@ export default function BroadcastClient({ channel }: Props) {
           )}
         </div>
 
-        {/* Audio level meter */}
         {state === 'live' && (
           <div className="mb-8">
             <p className="mb-2 text-xs text-zinc-500">Microphone level</p>
@@ -168,7 +214,6 @@ export default function BroadcastClient({ channel }: Props) {
           </p>
         )}
 
-        {/* Main button */}
         <div className="flex justify-center">
           {state === 'idle' || state === 'error' ? (
             <button
@@ -193,10 +238,6 @@ export default function BroadcastClient({ channel }: Props) {
             </button>
           )}
         </div>
-
-        <p className="mt-4 text-center text-xs text-zinc-600">
-          Browser broadcasting uses your microphone. For higher quality, use OBS or BUTT with the credentials below.
-        </p>
       </div>
 
       {/* OBS / BUTT credentials */}
@@ -206,9 +247,8 @@ export default function BroadcastClient({ channel }: Props) {
           <h2 className="font-semibold text-white">Stream via OBS / BUTT / Mixxx</h2>
         </div>
         <p className="mb-5 text-sm text-zinc-500">
-          Use any Icecast-compatible software for higher quality broadcasting. Point it at these credentials.
+          Use any Icecast-compatible software for higher quality or music broadcasting.
         </p>
-
         {[
           { label: 'Server / Host', value: icecastUrl.replace(/^https?:\/\//, '').split(':')[0], key: 'host' },
           { label: 'Port', value: '8000', key: 'port' },
