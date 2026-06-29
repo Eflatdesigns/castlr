@@ -46,5 +46,6 @@ export async function POST(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ ok: true, found, data, mount: mountName, is_live })
+  const keyHint = process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 12) ?? 'MISSING'
+  return NextResponse.json({ ok: true, found, data, mount: mountName, is_live, keyHint })
 }
