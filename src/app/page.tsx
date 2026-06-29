@@ -1,8 +1,8 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { Channel } from '@/types'
-import ChannelCard from '@/components/ChannelCard'
 import Navbar from '@/components/Navbar'
+import HomeChannels from '@/components/HomeChannels'
 
 export const revalidate = 30
 
@@ -17,21 +17,21 @@ async function getLiveChannels(): Promise<Channel[]> {
   return (data as Channel[]) ?? []
 }
 
-async function getRecentChannels(): Promise<Channel[]> {
+async function getAllChannels(): Promise<Channel[]> {
   const supabase = await createClient()
   const { data } = await supabase
     .from('channels')
     .select('*, user:profiles(id, username, display_name, avatar_url)')
     .eq('is_live', false)
     .order('updated_at', { ascending: false })
-    .limit(12)
+    .limit(40)
   return (data as Channel[]) ?? []
 }
 
 export default async function HomePage() {
-  const [liveChannels, recentChannels] = await Promise.all([
+  const [liveChannels, allChannels] = await Promise.all([
     getLiveChannels(),
-    getRecentChannels(),
+    getAllChannels(),
   ])
 
   return (
@@ -70,41 +70,7 @@ export default async function HomePage() {
       </section>
 
       <main className="mx-auto max-w-7xl px-4 py-12">
-        {liveChannels.length > 0 && (
-          <section id="live" className="mb-16">
-            <div className="mb-6 flex items-center gap-3">
-              <span className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
-              <h2 className="text-2xl font-bold text-white">Live now</h2>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {liveChannels.map((ch) => (
-                <ChannelCard key={ch.id} channel={ch} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {recentChannels.length > 0 && (
-          <section>
-            <h2 className="mb-6 text-2xl font-bold text-white">Channels</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {recentChannels.map((ch) => (
-                <ChannelCard key={ch.id} channel={ch} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {liveChannels.length === 0 && recentChannels.length === 0 && (
-          <div className="py-24 text-center text-zinc-500">
-            <p className="text-lg">No channels yet.</p>
-            <p className="mt-2 text-sm">
-              <Link href="/register" className="text-emerald-400 hover:underline">
-                Be the first to broadcast
-              </Link>
-            </p>
-          </div>
-        )}
+        <HomeChannels liveChannels={liveChannels} allChannels={allChannels} />
       </main>
     </div>
   )
