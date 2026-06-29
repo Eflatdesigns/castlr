@@ -31,7 +31,14 @@ export async function POST(req: NextRequest) {
   const mountName = mount.replace(/^\//, '')
   const is_live = event === 'connect'
 
-  const { data, error } = await getSupabase()
+  const sb = getSupabase()
+
+  const { data: found } = await sb
+    .from('channels')
+    .select('slug, is_live, icecast_mount')
+    .eq('icecast_mount', mountName)
+
+  const { data, error } = await sb
     .from('channels')
     .update({ is_live, listener_count: is_live ? (listeners ?? 0) : 0 })
     .eq('icecast_mount', mountName)
@@ -39,5 +46,5 @@ export async function POST(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ ok: true, data, mount: mountName, is_live })
+  return NextResponse.json({ ok: true, found, data, mount: mountName, is_live })
 }
