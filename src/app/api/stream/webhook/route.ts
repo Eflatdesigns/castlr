@@ -31,21 +31,14 @@ export async function POST(req: NextRequest) {
   const mountName = mount.replace(/^\//, '')
   const is_live = event === 'connect'
 
-  const sb = getSupabase()
-
-  const { data: found } = await sb
-    .from('channels')
-    .select('slug, is_live, icecast_mount')
-    .eq('icecast_mount', mountName)
-
-  const { data, error } = await sb
-    .from('channels')
-    .update({ is_live, listener_count: is_live ? (listeners ?? 0) : 0 })
-    .eq('icecast_mount', mountName)
-    .select('slug, is_live, icecast_mount')
+  const { data, error } = await getSupabase()
+    .rpc('update_stream_status', {
+      p_mount: mountName,
+      p_is_live: is_live,
+      p_listener_count: is_live ? (listeners ?? 0) : 0,
+    })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const keyHint = process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 12) ?? 'MISSING'
-  return NextResponse.json({ ok: true, found, data, mount: mountName, is_live, keyHint })
+  return NextResponse.json({ ok: true, data, mount: mountName, is_live })
 }
