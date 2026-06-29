@@ -2,18 +2,96 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import Navbar from '@/components/Navbar'
 import { Channel } from '@/types'
-import { ArrowLeft, Save } from 'lucide-react'
+import { ArrowLeft, Save, Upload } from 'lucide-react'
 
 const GENRES = [
   'Gospel', 'News & Talk', 'Afrobeats', 'Hip-Hop', 'Jazz',
   'Classical', 'Electronic', 'Sports', 'Education', 'Other',
 ]
+
+function ImageUpload({
+  label,
+  currentUrl,
+  aspectRatio,
+  onUploaded,
+  userId,
+  channelId,
+  field,
+}: {
+  label: string
+  currentUrl?: string | null
+  aspectRatio: 'square' | 'wide'
+  onUploaded: (url: string) => void
+  userId: string
+  channelId: string
+  field: 'logo' | 'cover'
+}) {
+  const supabase = createClient()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [preview, setPreview] = useState<string | null>(currentUrl ?? null)
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setPreview(URL.createObjectURL(file))
+    setUploading(true)
+
+    const ext = file.name.split('.').pop()
+    const path = `${userId}/${channelId}/${field}.${ext}`
+
+    const { error } = await supabase.storage
+      .from('channel-images')
+      .upload(path, file, { upsert: true })
+
+    if (!error) {
+      const { data } = supabase.storage.from('channel-images').getPublicUrl(path)
+      onUploaded(data.publicUrl)
+    }
+    setUploading(false)
+  }
+
+  const isWide = aspectRatio === 'wide'
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-zinc-400">{label}</label>
+      <div
+        onClick={() => inputRef.current?.click()}
+        className={`relative cursor-pointer overflow-hidden rounded-xl border-2 border-dashed border-zinc-700 bg-zinc-800 transition hover:border-emerald-500 ${isWide ? 'h-32 w-full' : 'h-24 w-24'}`}
+      >
+        {preview ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={preview} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-zinc-500">
+            <Upload className="h-5 w-5" />
+            <span className="text-xs">Upload</span>
+          </div>
+        )}
+        {uploading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/70">
+            <span className="text-xs text-white">Uploading...</span>
+          </div>
+        )}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={handleFile}
+      />
+    </div>
+  )
+}
 
 export default function ChannelSettingsPage() {
   const { id } = useParams<{ id: string }>()
@@ -21,7 +99,9 @@ export default function ChannelSettingsPage() {
   const supabase = createClient()
 
   const [channel, setChannel] = useState<Channel | null>(null)
+  const [userId, setUserId] = useState('')
   const [form, setForm] = useState({ name: '', description: '', genre: '', website: '' })
+  const [images, setImages] = useState({ logo_url: '', cover_url: '' })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -41,6 +121,7 @@ export default function ChannelSettingsPage() {
 
       if (!data) { router.push('/dashboard'); return }
 
+      setUserId(user.id)
       setChannel(data as Channel)
       setForm({
         name: data.name ?? '',
@@ -48,6 +129,7 @@ export default function ChannelSettingsPage() {
         genre: data.genre ?? '',
         website: data.website ?? '',
       })
+      setImages({ logo_url: data.logo_url ?? '', cover_url: data.cover_url ?? '' })
       setLoading(false)
     }
     load()
@@ -72,6 +154,8 @@ export default function ChannelSettingsPage() {
         description: form.description || null,
         genre: form.genre || null,
         website: form.website || null,
+        logo_url: images.logo_url || null,
+        cover_url: images.cover_url || null,
       })
       .eq('id', id)
 
@@ -118,6 +202,28 @@ export default function ChannelSettingsPage() {
               Changes saved.
             </p>
           )}
+
+          {/* Images */}
+          <div className="space-y-4">
+            <ImageUpload
+              label="Cover image"
+              currentUrl={images.cover_url}
+              aspectRatio="wide"
+              userId={userId}
+              channelId={id}
+              field="cover"
+              onUploaded={(url) => { setImages((i) => ({ ...i, cover_url: url })); setSuccess(false) }}
+            />
+            <ImageUpload
+              label="Channel logo"
+              currentUrl={images.logo_url}
+              aspectRatio="square"
+              userId={userId}
+              channelId={id}
+              field="logo"
+              onUploaded={(url) => { setImages((i) => ({ ...i, logo_url: url })); setSuccess(false) }}
+            />
+          </div>
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-zinc-400">
