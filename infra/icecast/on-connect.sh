@@ -5,7 +5,7 @@
 
 MOUNT="${ICECAST_ARG_MOUNT}"
 WEBHOOK_URL="https://castlr.vercel.app/api/stream/webhook"
-WEBHOOK_SECRET="YOUR_STREAM_WEBHOOK_SECRET"
+WEBHOOK_SECRET="a8e523dd2d55411dcceba0e90cc02dc06958a78a605325de9a22f0cb2c89de0f"
 
 curl -s -X POST "$WEBHOOK_URL" \
   -H "Content-Type: application/json" \
