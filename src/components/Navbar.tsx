@@ -36,6 +36,12 @@ export default function Navbar() {
                 Dashboard
               </Link>
               <Link
+                href="/dashboard/profile"
+                className="text-sm text-zinc-400 hover:text-white transition"
+              >
+                Profile
+              </Link>
+              <Link
                 href="/dashboard/broadcast"
                 className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400"
               >
