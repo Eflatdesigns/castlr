@@ -19,6 +19,16 @@ export default function BroadcastClient({ channel }: Props) {
   const [listenerCount, setListenerCount] = useState(0)
   const [copied, setCopied] = useState<string | null>(null)
   const [audioLevel, setAudioLevel] = useState(0)
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+  const [selectedDevice, setSelectedDevice] = useState<string>('')
+
+  useEffect(() => {
+    navigator.mediaDevices.enumerateDevices().then((all) => {
+      const mics = all.filter((d) => d.kind === 'audioinput')
+      setDevices(mics)
+      if (mics.length > 0) setSelectedDevice(mics[0].deviceId)
+    })
+  }, [])
 
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -67,7 +77,8 @@ export default function BroadcastClient({ channel }: Props) {
 
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      const audioConstraints = selectedDevice ? { deviceId: { exact: selectedDevice } } : true
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
     } catch {
       setErrorMsg('Could not access microphone. Please allow microphone access and try again.')
       setState('error')
@@ -205,6 +216,23 @@ export default function BroadcastClient({ channel }: Props) {
                 style={{ width: `${audioLevel}%` }}
               />
             </div>
+          </div>
+        )}
+
+        {devices.length > 1 && state === 'idle' && (
+          <div className="mb-6">
+            <label className="mb-1.5 block text-xs text-zinc-500">Microphone</label>
+            <select
+              value={selectedDevice}
+              onChange={(e) => setSelectedDevice(e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            >
+              {devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
+                </option>
+              ))}
+            </select>
           </div>
         )}
 
